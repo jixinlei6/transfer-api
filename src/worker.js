@@ -1,6 +1,6 @@
 const DEFAULT_UPSTREAM_BASE_URL = "https://apihub.agnes-ai.com";
-const DEFAULT_OPENAI_MODEL = "agnes-5";
-const DEFAULT_CLAUDE_MODEL = "agnes-5";
+const DEFAULT_OPENAI_MODEL = "agnes-2.5-flash";
+const DEFAULT_CLAUDE_MODEL = "agnes-2.5-pro";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -58,7 +58,7 @@ export default {
   },
 };
 
-async function handleOpenAI(request, env, path) {
+ function handleOpenAI(request, env, path) {
   if ((path === "/v1/key" || path === "/v1/auth-key" || path === "/v1/usage") && request.method === "GET") {
     const rawPath = path === "/v1/usage" ? "/api/usage" : "/api/key";
     return proxyUpstream(request, env, rawPath);
@@ -116,7 +116,7 @@ async function handleOpenAI(request, env, path) {
   return errorResponse(404, "not_found", `Unsupported OpenAI-compatible route ${path}`);
 }
 
-async function openAIDirectCapability(request, env, body, route) {
+ function openAIDirectCapability(request, env, body, route) {
   const model = body.model || env.DEFAULT_MODEL || DEFAULT_OPENAI_MODEL;
   const created = nowSeconds();
   const id = `chatcmpl_${randomId()}`;
@@ -300,7 +300,20 @@ async function anthropicModels(request, env) {
 
 async function openAIModels(request, env) {
   return jsonResponse({
-    data: [{ id: DEFAULT_OPENAI_MODEL, object: "model", created: nowSeconds(), owned_by: "agnes-ai" }],
+    data: [
+      // 文本模型
+      { id: "agnes-2.0-flash", object: "model", created: nowSeconds(), owned_by: "agnes-ai" },
+      { id: "agnes-2.5-flash", object: "model", created: nowSeconds(), owned_by: "agnes-ai" },
+      { id: "agnes-2.5-pro-alpha", object: "model", created: nowSeconds(), owned_by: "agnes-ai" },
+      { id: "agnes-2.5-pro", object: "model", created: nowSeconds(), owned_by: "agnes-ai" },
+      // 图像模型
+      { id: "agnes-image-2.0-flash", object: "model", created: nowSeconds(), owned_by: "agnes-ai" },
+      { id: "agnes-image-2.1-flash", object: "model", created: nowSeconds(), owned_by: "agnes-ai" },
+      // 视频模型
+      { id: "agnes-video-v2", object: "model", created: nowSeconds(), owned_by: "agnes-ai" },
+      { id: "agnes-video-2.5", object: "model", created: nowSeconds(), owned_by: "agnes-ai" },
+      { id: "agnes-video-2.5-flash", object: "model", created: nowSeconds(), owned_by: "agnes-ai" },
+    ],
     object: "list",
   });
 }
