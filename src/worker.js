@@ -58,7 +58,7 @@ export default {
   },
 };
 
- async function handleOpenAI(request, env, path) {
+async function handleOpenAI(request, env, path) {
   if ((path === "/v1/key" || path === "/v1/auth-key" || path === "/v1/usage") && request.method === "GET") {
     const rawPath = path === "/v1/usage" ? "/api/usage" : "/api/key";
     return proxyUpstream(request, env, rawPath);
@@ -116,7 +116,7 @@ export default {
   return errorResponse(404, "not_found", `Unsupported OpenAI-compatible route ${path}`);
 }
 
- function openAIDirectCapability(request, env, body, route) {
+async function openAIDirectCapability(request, env, body, route) {
   const model = body.model || env.DEFAULT_MODEL || DEFAULT_OPENAI_MODEL;
   const created = nowSeconds();
   const id = `chatcmpl_${randomId()}`;
@@ -301,15 +301,12 @@ async function anthropicModels(request, env) {
 async function openAIModels(request, env) {
   return jsonResponse({
     data: [
-      // 文本模型
       { id: "agnes-2.0-flash", object: "model", created: nowSeconds(), owned_by: "agnes-ai" },
       { id: "agnes-2.5-flash", object: "model", created: nowSeconds(), owned_by: "agnes-ai" },
       { id: "agnes-2.5-pro-alpha", object: "model", created: nowSeconds(), owned_by: "agnes-ai" },
       { id: "agnes-2.5-pro", object: "model", created: nowSeconds(), owned_by: "agnes-ai" },
-      // 图像模型
       { id: "agnes-image-2.0-flash", object: "model", created: nowSeconds(), owned_by: "agnes-ai" },
       { id: "agnes-image-2.1-flash", object: "model", created: nowSeconds(), owned_by: "agnes-ai" },
-      // 视频模型
       { id: "agnes-video-v2", object: "model", created: nowSeconds(), owned_by: "agnes-ai" },
       { id: "agnes-video-2.5", object: "model", created: nowSeconds(), owned_by: "agnes-ai" },
       { id: "agnes-video-2.5-flash", object: "model", created: nowSeconds(), owned_by: "agnes-ai" },
@@ -317,8 +314,6 @@ async function openAIModels(request, env) {
     object: "list",
   });
 }
-
-// ========== 辅助函数 ==========
 
 async function proxyUpstream(request, env, path) {
   const upstreamUrl = `${DEFAULT_UPSTREAM_BASE_URL}${path}`;
@@ -646,8 +641,6 @@ function streamAnthropic(upstream, config) {
     },
   });
 }
-
-// ========== 工具函数 ==========
 
 function sseResponse(stream) {
   return new Response(stream, {
