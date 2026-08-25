@@ -58,7 +58,7 @@ export default {
   },
 };
 
- function handleOpenAI(request, env, path) {
+ async function handleOpenAI(request, env, path) {
   if ((path === "/v1/key" || path === "/v1/auth-key" || path === "/v1/usage") && request.method === "GET") {
     const rawPath = path === "/v1/usage" ? "/api/usage" : "/api/key";
     return proxyUpstream(request, env, rawPath);
