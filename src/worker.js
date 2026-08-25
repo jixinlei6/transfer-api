@@ -326,6 +326,7 @@ async function openAIModels(request, env) {
 }
 
 // 辅助函数
+
 async function proxyUpstream(request, env, path) {
   const upstreamUrl = `${DEFAULT_UPSTREAM_BASE_URL}${path}`;
   const apiKey = env.AGNES_API_KEY || env.UNLIMITED_SURF_API_KEY || "";
@@ -345,7 +346,6 @@ async function proxyUpstream(request, env, path) {
     Object.entries(CORS_HEADERS).forEach(([key, value]) => {
       responseHeaders.set(key, value);
     });
-    responseHeaders.set("Access-Control-Allow-Origin", "*");
 
     return new Response(response.body, {
       status: response.status,
@@ -681,6 +681,8 @@ function streamAnthropic(upstream, config) {
   });
 }
 
+// 工具函数
+
 function sseResponse(stream) {
   return new Response(stream, {
     headers: {
@@ -692,8 +694,9 @@ function sseResponse(stream) {
   });
 }
 
-function jsonResponse(data) {
+function jsonResponse(data, status = 200) {
   return new Response(JSON.stringify(data), {
+    status,
     headers: {
       "Content-Type": "application/json",
       ...CORS_HEADERS,
@@ -718,16 +721,6 @@ function errorResponse(status, errorCode, errorMessage) {
       code: status,
     },
   }, status);
-}
-
-function jsonResponse(data, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      "Content-Type": "application/json",
-      ...CORS_HEADERS,
-    },
-  });
 }
 
 function normalizePath(path) {
@@ -765,10 +758,6 @@ function serviceInfo(request, env) {
     service: "agnes-ai-transfer-worker",
     upstream: DEFAULT_UPSTREAM_BASE_URL,
     timestamp: new Date().toISOString(),
-    environment: {
-      node: "production",
-      worker: request.headers.get("cf-worker") || "unknown",
-    },
   };
 }
 
@@ -780,79 +769,4 @@ function randomId(length = 21) {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
   let result = "";
   for (let i = 0; i < length; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return result;
-}
-
-function looksLikeAnthropicRequest(request) {
-  const auth = request.headers.get("authorization") || "";
-  const apiKey = request.headers.get("x-api-key") || "";
-  const anthropicVersion = request.headers.get("anthropic-version") || "";
-  return auth.includes("sk-ant") || apiKey.startsWith("sk-ant") || anthropicVersion !== "";
-}
-
-function usageFromText(input, output) {
-  return {
-    prompt_tokens: input.length,
-    completion_tokens: output.length,
-    total_tokens: input.length + output.length,
-  };
-}
-
-function responseUsageFromText(input, output) {
-  return {
-    input_tokens: input.length,
-    output_tokens: output.length,
-    total_tokens: input.length + output.length,
-  };
-}
-
-function mcpInfo(request) {
-  return jsonResponse({
-    message: "MCP servers must be configured in your local agent, IDE, or Claude Code/Codex environment.",
-    documentation: `${DEFAULT_UPSTREAM_BASE_URL}/mcp`,
-    setup: {
-      note: "This Worker only provides the model API endpoint.",
-      limitation: "It does not read or modify local files from Cloudflare edge.",
-    },
-  });
-}
-
-function codexSetup(request) {
-  return `# Codex CLI Setup
-
-Set the following environment variables before running Codex:
-
-\`\`\`bash
-export OPENAI_BASE_URL="${DEFAULT_UPSTREAM_BASE_URL}/v1"
-export OPENAI_API_KEY="<your WORKER_API_KEY>"
-export OPENAI_MODEL="${DEFAULT_OPENAI_MODEL}"
-\`\`\`
-
-Or use directly:
-\`\`\`bash
-codex --api-base-url "${DEFAULT_UPSTREAM_BASE_URL}/v1" --api-key "<your WORKER_API_KEY>"
-\`\`\`
-`;
-}
-
-function agentSetup(request) {
-  return `# Agent Setup Guide
-
-## OpenAI Compatible (recommended)
-
-Base URL: \`${DEFAULT_UPSTREAM_BASE_URL}/v1\`
-API Key: Your WORKER_API_KEY
-
-## Anthropic/Claude Compatible
-
-Base URL: \`${DEFAULT_UPSTREAM_BASE_URL}\`
-API Key: Your WORKER_API_KEY
-
-## Models Available
-
-Use any model ID supported by ${DEFAULT_UPSTREAM_BASE_URL}.
-Check \`/v1/models\` for the full list.
-`;
-}
+    result += chars.charAt(Ma
