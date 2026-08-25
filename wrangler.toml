@@ -2,15 +2,7 @@ name = "unlimited-transfer-api"
 main = "src/worker.js"
 compatibility_date = "2025-11-21"
 
-# Store the upstream key as a secret instead of committing it here:
-#   wrangler secret put AGNES_API_KEY
-#
-# Optional: protect this Worker with your own client-facing key:
-#   wrangler secret put WORKER_API_KEY
-# When WORKER_API_KEY is set, clients must send it as Authorization: Bearer <key>.
-# If it is not set, the Worker accepts any client key.
-
 [vars]
 UPSTREAM_BASE_URL = "https://apihub.agnes-ai.com"
-DEFAULT_MODEL = "agnes-5"
-DEFAULT_CLAUDE_MODEL = "agnes-5"
+DEFAULT_MODEL = "agnes-2.5-flash"
+DEFAULT_CLAUDE_MODEL = "agnes-2.5-pro"
