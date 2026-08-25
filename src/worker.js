@@ -100,7 +100,7 @@ async function handleOpenAI(request, env, path) {
 
   if ((path === "/v1/files/extract" || path === "/v1/attachments/extract") && request.method === "POST") {
     const body = await readJson(request);
-    const extracted = await callUnlimitedJson(request, env, "/api/attachments/extract", body);
+    const extracted = await callUpstreamJson(request, env, "/api/attachments/extract", body);
     return jsonResponse(extracted);
   }
 
@@ -119,14 +119,14 @@ async function openAIDirectCapability(request, env, body, route) {
   const model = body.model || env.DEFAULT_MODEL || DEFAULT_OPENAI_MODEL;
   const created = nowSeconds();
   const id = `chatcmpl_${randomId()}`;
-  const payload = buildUnlimitedPayload({ ...body, web_search: route === "/api/search", merge: route === "/api/merge" }, route);
+  const payload = buildUpstreamPayload({ ...body, web_search: route === "/api/search", merge: route === "/api/merge" }, route);
 
   if (body.stream !== false) {
-    const upstream = await callUnlimitedStream(request, env, route, payload);
+    const upstream = await callUpstreamStream(request, env, route, payload);
     return sseResponse(streamOpenAIChat(upstream, { id, created, model }));
   }
 
-  const result = await collectUnlimitedText(request, env, route, payload);
+  const result = await collectUpstreamText(request, env, route, payload);
   return jsonResponse({
     id,
     object: "chat.completion",
@@ -149,15 +149,15 @@ async function openAIChatCompletions(request, env, body) {
   const model = body.model || env.DEFAULT_MODEL || DEFAULT_OPENAI_MODEL;
   const created = nowSeconds();
   const id = `chatcmpl_${randomId()}`;
-  const route = chooseUnlimitedRoute(body);
-  const payload = buildUnlimitedPayload(body, route);
+  const route = chooseUpstreamRoute(body);
+  const payload = buildUpstreamPayload(body, route);
 
   if (body.stream) {
-    const upstream = await callUnlimitedStream(request, env, route, payload);
+    const upstream = await callUpstreamStream(request, env, route, payload);
     return sseResponse(streamOpenAIChat(upstream, { id, created, model }));
   }
 
-  const result = await collectUnlimitedText(request, env, route, payload);
+  const result = await collectUpstreamText(request, env, route, payload);
   return jsonResponse({
     id,
     object: "chat.completion",
@@ -181,15 +181,15 @@ async function openAIResponses(request, env, body) {
   const created = nowSeconds();
   const id = `resp_${randomId()}`;
   const syntheticChatBody = responsesToChatBody(body, model);
-  const route = chooseUnlimitedRoute(syntheticChatBody);
-  const payload = buildUnlimitedPayload(syntheticChatBody, route);
+  const route = chooseUpstreamRoute(syntheticChatBody);
+  const payload = buildUpstreamPayload(syntheticChatBody, route);
 
   if (body.stream) {
-    const upstream = await callUnlimitedStream(request, env, route, payload);
+    const upstream = await callUpstreamStream(request, env, route, payload);
     return sseResponse(streamOpenAIResponses(upstream, { id, created, model }));
   }
 
-  const result = await collectUnlimitedText(request, env, route, payload);
+  const result = await collectUpstreamText(request, env, route, payload);
   return jsonResponse({
     id,
     object: "response",
@@ -228,7 +228,7 @@ async function openAIFileUpload(request, env) {
   const body = await readJson(request);
   const fileData = body.file || body;
   const route = "/api/attachments/upload";
-  const result = await callUnlimitedJson(request, env, route, fileData);
+  const result = await callUpstreamJson(request, env, route, fileData);
   return jsonResponse(result);
 }
 
@@ -267,28 +267,20 @@ async function anthropicMessages(request, env, body) {
   const payload = buildAnthropicPayload(body);
 
   if (stream) {
-    const upstream = await callUnlimitedStream(request, env, route, payload);
+    const upstream = await callUpstreamStream(request, env, route, payload);
     return sseResponse(streamAnthropic(upstream, { model }));
   }
 
-  const result = await collectUnlimitedText(request, env, route, payload);
+  const result = await collectUpstreamText(request, env, route, payload);
   return jsonResponse({
     id: `msg_${randomId()}`,
     type: "message",
     role: "assistant",
     model,
-    content: [
-      {
-        type: "text",
-        text: result.text,
-      },
-    ],
+    content: [{ type: "text", text: result.text }],
     stop_reason: result.finishReason || "end_turn",
     stop_sequence: null,
-    usage: {
-      input_tokens: result.inputTokens || 0,
-      output_tokens: result.outputTokens || 0,
-    },
+    usage: { input_tokens: 0, output_tokens: result.outputTokens || 0 },
   });
 }
 
@@ -298,13 +290,7 @@ async function anthropicCountTokens(request, env, body) {
 
 async function anthropicModels(request, env) {
   return jsonResponse({
-    data: [
-      {
-        id: DEFAULT_CLAUDE_MODEL,
-        type: "model",
-        name: DEFAULT_CLAUDE_MODEL,
-      },
-    ],
+    data: [{ id: DEFAULT_CLAUDE_MODEL, type: "model", name: DEFAULT_CLAUDE_MODEL }],
     stop_reason: null,
     trim_transcript_usd: null,
     type: "list",
@@ -313,19 +299,12 @@ async function anthropicModels(request, env) {
 
 async function openAIModels(request, env) {
   return jsonResponse({
-    data: [
-      {
-        id: DEFAULT_OPENAI_MODEL,
-        object: "model",
-        created: nowSeconds(),
-        owned_by: "agnes-ai",
-      },
-    ],
+    data: [{ id: DEFAULT_OPENAI_MODEL, object: "model", created: nowSeconds(), owned_by: "agnes-ai" }],
     object: "list",
   });
 }
 
-// 辅助函数
+// ========== 辅助函数 ==========
 
 async function proxyUpstream(request, env, path) {
   const upstreamUrl = `${DEFAULT_UPSTREAM_BASE_URL}${path}`;
@@ -357,14 +336,14 @@ async function proxyUpstream(request, env, path) {
   }
 }
 
-async function callUnlimitedJson(request, env, route, body) {
+async function callUpstreamJson(request, env, route, body) {
   const upstreamUrl = `${DEFAULT_UPSTREAM_BASE_URL}${route}`;
   const apiKey = env.AGNES_API_KEY || env.UNLIMITED_SURF_API_KEY || "";
 
   const headers = {
     "Content-Type": "application/json",
     "Authorization": `Bearer ${apiKey}`,
-    ...request.headers,
+    ...Object.fromEntries(request.headers),
   };
 
   const response = await fetch(upstreamUrl, {
@@ -381,7 +360,7 @@ async function callUnlimitedJson(request, env, route, body) {
   return response.json();
 }
 
-async function callUnlimitedStream(request, env, route, body) {
+async function callUpstreamStream(request, env, route, body) {
   const upstreamUrl = `${DEFAULT_UPSTREAM_BASE_URL}${route}`;
   const apiKey = env.AGNES_API_KEY || env.UNLIMITED_SURF_API_KEY || "";
 
@@ -389,7 +368,7 @@ async function callUnlimitedStream(request, env, route, body) {
     "Content-Type": "application/json",
     "Authorization": `Bearer ${apiKey}`,
     "Accept": "text/event-stream",
-    ...request.headers,
+    ...Object.fromEntries(request.headers),
   };
 
   return fetch(upstreamUrl, {
@@ -399,12 +378,13 @@ async function callUnlimitedStream(request, env, route, body) {
   });
 }
 
-async function collectUnlimitedText(request, env, route, body) {
-  const upstream = await callUnlimitedStream(request, env, route, body);
+async function collectUpstreamText(request, env, route, body) {
+  const upstream = await callUpstreamStream(request, env, route, body);
   const reader = upstream.body.getReader();
   const decoder = new TextDecoder();
   let text = "";
   let finishReason = "stop";
+  let outputTokens = 0;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -426,16 +406,19 @@ async function collectUnlimitedText(request, env, route, body) {
         if (json.choices?.[0]?.finish_reason) {
           finishReason = json.choices[0].finish_reason;
         }
+        if (json.usage?.completion_tokens) {
+          outputTokens = json.usage.completion_tokens;
+        }
       } catch {
-        // ignore parse errors
+        // ignore
       }
     }
   }
 
-  return { text, finishReason };
+  return { text, finishReason, outputTokens };
 }
 
-function buildUnlimitedPayload(body, route) {
+function buildUpstreamPayload(body, route) {
   const payload = { ...body };
 
   if (route === "/api/search") {
@@ -478,14 +461,10 @@ function responsesToChatBody(body, model) {
     }
   }
 
-  return {
-    model,
-    messages,
-    stream: body.stream,
-  };
+  return { model, messages, stream: body.stream };
 }
 
-function chooseUnlimitedRoute(body) {
+function chooseUpstreamRoute(body) {
   if (body.web_search_options || body.query) return "/api/search";
   if (body.merge || (Array.isArray(body.models) && body.models.length > 1)) return "/api/merge";
   return "/api/chat";
@@ -529,19 +508,13 @@ function streamOpenAIChat(upstream, config) {
                   object: "chat.completion.chunk",
                   created,
                   model,
-                  choices: [
-                    {
-                      index: 0,
-                      delta: content ? { content } : {},
-                      finish_reason: finishReason,
-                    },
-                  ],
+                  choices: [{ index: 0, delta: content ? { content } : {}, finish_reason: finishReason }],
                 };
                 controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(chunk)}\n\n`));
                 firstChunk = false;
               }
             } catch {
-              // skip invalid chunks
+              // skip
             }
           }
         }
@@ -583,11 +556,7 @@ function streamOpenAIResponses(upstream, config) {
               const content = json.choices?.[0]?.delta?.content || "";
               outputText += content;
 
-              const chunk = {
-                id,
-                object: "response.output_text.delta",
-                delta: content,
-              };
+              const chunk = { id, object: "response.output_text.delta", delta: content };
               controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(chunk)}\n\n`));
             } catch {
               // skip
@@ -598,14 +567,7 @@ function streamOpenAIResponses(upstream, config) {
         const finalChunk = {
           id,
           object: "response.output_item.added",
-          output: [
-            {
-              id: `msg_${randomId()}`,
-              type: "message",
-              role: "assistant",
-              content: [{ type: "output_text", text: outputText }],
-            },
-          ],
+          output: [{ id: `msg_${randomId()}`, type: "message", role: "assistant", content: [{ type: "output_text", text: outputText }] }],
         };
         controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(finalChunk)}\n\n`));
         controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"));
@@ -647,18 +609,10 @@ function streamAnthropic(upstream, config) {
 
               if (eventType === "content_block_delta") {
                 const text = json.delta?.text || "";
-                const chunk = {
-                  type: "content_block_delta",
-                  index: 0,
-                  delta: { type: "text_delta", text },
-                };
+                const chunk = { type: "content_block_delta", index: 0, delta: { type: "text_delta", text } };
                 controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(chunk)}\n\n`));
               } else if (eventType === "message_delta") {
-                const chunk = {
-                  type: "message_delta",
-                  delta: json.delta,
-                  index: 0,
-                };
+                const chunk = { type: "message_delta", delta: json.delta, index: 0 };
                 controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(chunk)}\n\n`));
               }
             } catch {
@@ -667,9 +621,7 @@ function streamAnthropic(upstream, config) {
           }
         }
 
-        const stopChunk = {
-          type: "message_stop",
-        };
+        const stopChunk = { type: "message_stop" };
         controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(stopChunk)}\n\n`));
         controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"));
       } catch (error) {
@@ -681,46 +633,24 @@ function streamAnthropic(upstream, config) {
   });
 }
 
-// 工具函数
+// ========== 工具函数 ==========
 
 function sseResponse(stream) {
   return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      "Connection": "keep-alive",
-      ...CORS_HEADERS,
-    },
+    headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive", ...CORS_HEADERS },
   });
 }
 
 function jsonResponse(data, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      "Content-Type": "application/json",
-      ...CORS_HEADERS,
-    },
-  });
+  return new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json", ...CORS_HEADERS } });
 }
 
 function textResponse(text, contentType = "text/plain; charset=utf-8") {
-  return new Response(text, {
-    headers: {
-      "Content-Type": contentType,
-      ...CORS_HEADERS,
-    },
-  });
+  return new Response(text, { headers: { "Content-Type": contentType, ...CORS_HEADERS } });
 }
 
 function errorResponse(status, errorCode, errorMessage) {
-  return jsonResponse({
-    error: {
-      message: errorMessage,
-      type: errorCode,
-      code: status,
-    },
-  }, status);
+  return jsonResponse({ error: { message: errorMessage, type: errorCode, code: status } }, status);
 }
 
 function normalizePath(path) {
@@ -729,14 +659,8 @@ function normalizePath(path) {
 
 async function readJson(request) {
   const contentType = request.headers.get("content-type") || "";
-  if (!contentType.includes("application/json")) {
-    return {};
-  }
-  try {
-    return await request.json();
-  } catch {
-    return {};
-  }
+  if (!contentType.includes("application/json")) return {};
+  try { return await request.json(); } catch { return {}; }
 }
 
 function validateWorkerApiKey(request, env) {
@@ -753,20 +677,45 @@ function validateWorkerApiKey(request, env) {
 }
 
 function serviceInfo(request, env) {
-  return {
-    ok: true,
-    service: "agnes-ai-transfer-worker",
-    upstream: DEFAULT_UPSTREAM_BASE_URL,
-    timestamp: new Date().toISOString(),
-  };
+  return { ok: true, service: "agnes-ai-transfer-worker", upstream: DEFAULT_UPSTREAM_BASE_URL, timestamp: new Date().toISOString() };
 }
 
-function nowSeconds() {
-  return Math.floor(Date.now() / 1000);
-}
+function nowSeconds() { return Math.floor(Date.now() / 1000); }
 
 function randomId(length = 21) {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
   let result = "";
-  for (let i = 0; i < length; i++) {
-    result += chars.charAt(Ma
+  for (let i = 0; i < length; i++) result += chars.charAt(Math.floor(Math.random() * chars.length));
+  return result;
+}
+
+function looksLikeAnthropicRequest(request) {
+  const auth = request.headers.get("authorization") || "";
+  const apiKey = request.headers.get("x-api-key") || "";
+  const anthropicVersion = request.headers.get("anthropic-version") || "";
+  return auth.includes("sk-ant") || apiKey.startsWith("sk-ant") || anthropicVersion !== "";
+}
+
+function usageFromText(input, output) {
+  return { prompt_tokens: input.length, completion_tokens: output.length, total_tokens: input.length + output.length };
+}
+
+function responseUsageFromText(input, output) {
+  return { input_tokens: input.length, output_tokens: output.length, total_tokens: input.length + output.length };
+}
+
+function mcpInfo(request) {
+  return jsonResponse({
+    message: "MCP servers must be configured in your local agent, IDE, or Claude Code/Codex environment.",
+    documentation: `${DEFAULT_UPSTREAM_BASE_URL}/mcp`,
+    setup: { note: "This Worker only provides the model API endpoint.", limitation: "It does not read or modify local files from Cloudflare edge." },
+  });
+}
+
+function codexSetup(request) {
+  return `# Codex CLI Setup\n\nSet the following environment variables before running Codex:\n\n\`\`\`bash\nexport OPENAI_BASE_URL="${DEFAULT_UPSTREAM_BASE_URL}/v1"\nexport OPENAI_API_KEY="<your WORKER_API_KEY>"\nexport OPENAI_MODEL="${DEFAULT_OPENAI_MODEL}"\n\`\`\`\n\nOr use directly:\n\`\`\`bash\ncodex --api-base-url "${DEFAULT_UPSTREAM_BASE_URL}/v1" --api-key "<your WORKER_API_KEY>"\n\`\`\``;
+}
+
+function agentSetup(request) {
+  return `# Agent Setup Guide\n\n## OpenAI Compatible (recommended)\nBase URL: \`${DEFAULT_UPSTREAM_BASE_URL}/v1\`\nAPI Key: Your WORKER_API_KEY\n\n## Anthropic/Claude Compatible\nBase URL: \`${DEFAULT_UPSTREAM_BASE_URL}\`\nAPI Key: Your WORKER_API_KEY\n\n## Models Available\nUse any model ID supported by ${DEFAULT_UPSTREAM_BASE_URL}.\nCheck \`/v1/models\` for the full list.`;
+}
