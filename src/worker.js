@@ -59,6 +59,11 @@ export default {
 };
 
 async function handleOpenAI(request, env, path) {
+  // 直接代理标准 OpenAI 路径到 agnes-ai
+  if (path === "/v1/chat/completions" || path === "/v1/responses") {
+    return proxyUpstream(request, env, path);
+  }
+
   if ((path === "/v1/key" || path === "/v1/auth-key" || path === "/v1/usage") && request.method === "GET") {
     const rawPath = path === "/v1/usage" ? "/api/usage" : "/api/key";
     return proxyUpstream(request, env, rawPath);
@@ -73,22 +78,12 @@ async function handleOpenAI(request, env, path) {
 
   if (path === "/v1/search" && request.method === "POST") {
     const body = await readJson(request);
-    return openAIDirectCapability(request, env, body, "/api/search");
+    return openAIDirectCapability(request, env, body, "/v1/chat/completions");
   }
 
   if (path === "/v1/merge" && request.method === "POST") {
     const body = await readJson(request);
-    return openAIDirectCapability(request, env, body, "/api/merge");
-  }
-
-  if (path === "/v1/chat/completions" && request.method === "POST") {
-    const body = await readJson(request);
-    return openAIChatCompletions(request, env, body);
-  }
-
-  if (path === "/v1/responses" && request.method === "POST") {
-    const body = await readJson(request);
-    return openAIResponses(request, env, body);
+    return openAIDirectCapability(request, env, body, "/v1/chat/completions");
   }
 
   if (path === "/v1/files" && request.method === "GET") {
@@ -100,9 +95,7 @@ async function handleOpenAI(request, env, path) {
   }
 
   if ((path === "/v1/files/extract" || path === "/v1/attachments/extract") && request.method === "POST") {
-    const body = await readJson(request);
-    const extracted = await callUpstreamJson(request, env, "/api/attachments/extract", body);
-    return jsonResponse(extracted);
+    return proxyUpstream(request, env, "/v1/files/extract");
   }
 
   if (path.startsWith("/v1/files/") && request.method === "GET") {
@@ -120,14 +113,13 @@ async function openAIDirectCapability(request, env, body, route) {
   const model = body.model || env.DEFAULT_MODEL || DEFAULT_OPENAI_MODEL;
   const created = nowSeconds();
   const id = `chatcmpl_${randomId()}`;
-  const payload = buildUpstreamPayload({ ...body, web_search: route === "/api/search", merge: route === "/api/merge" }, route);
 
   if (body.stream !== false) {
-    const upstream = await callUpstreamStream(request, env, route, payload);
+    const upstream = await callUpstreamStream(request, env, route, body);
     return sseResponse(streamOpenAIChat(upstream, { id, created, model }));
   }
 
-  const result = await collectUpstreamText(request, env, route, payload);
+  const result = await collectUpstreamText(request, env, route, body);
   return jsonResponse({
     id,
     object: "chat.completion",
@@ -141,7 +133,7 @@ async function openAIDirectCapability(request, env, body, route) {
         finish_reason: result.finishReason || "stop",
       },
     ],
-    usage: usageFromText(payload.message || payload.query || "", result.text),
+    usage: usageFromText(body.messages?.[0]?.content || "", result.text),
     system_fingerprint: `agnes-ai-worker:${route}`,
   });
 }
@@ -150,15 +142,13 @@ async function openAIChatCompletions(request, env, body) {
   const model = body.model || env.DEFAULT_MODEL || DEFAULT_OPENAI_MODEL;
   const created = nowSeconds();
   const id = `chatcmpl_${randomId()}`;
-  const route = chooseUpstreamRoute(body);
-  const payload = buildUpstreamPayload(body, route);
 
   if (body.stream) {
-    const upstream = await callUpstreamStream(request, env, route, payload);
+    const upstream = await callUpstreamStream(request, env, "/v1/chat/completions", body);
     return sseResponse(streamOpenAIChat(upstream, { id, created, model }));
   }
 
-  const result = await collectUpstreamText(request, env, route, payload);
+  const result = await collectUpstreamText(request, env, "/v1/chat/completions", body);
   return jsonResponse({
     id,
     object: "chat.completion",
@@ -172,7 +162,7 @@ async function openAIChatCompletions(request, env, body) {
         finish_reason: result.finishReason || "stop",
       },
     ],
-    usage: usageFromText(payload.message || "", result.text),
+    usage: usageFromText(body.messages?.[0]?.content || "", result.text),
     system_fingerprint: "agnes-ai-worker",
   });
 }
@@ -182,15 +172,13 @@ async function openAIResponses(request, env, body) {
   const created = nowSeconds();
   const id = `resp_${randomId()}`;
   const syntheticChatBody = responsesToChatBody(body, model);
-  const route = chooseUpstreamRoute(syntheticChatBody);
-  const payload = buildUpstreamPayload(syntheticChatBody, route);
 
   if (body.stream) {
-    const upstream = await callUpstreamStream(request, env, route, payload);
+    const upstream = await callUpstreamStream(request, env, "/v1/chat/completions", syntheticChatBody);
     return sseResponse(streamOpenAIResponses(upstream, { id, created, model }));
   }
 
-  const result = await collectUpstreamText(request, env, route, payload);
+  const result = await collectUpstreamText(request, env, "/v1/chat/completions", syntheticChatBody);
   return jsonResponse({
     id,
     object: "response",
@@ -221,16 +209,12 @@ async function openAIResponses(request, env, body) {
     tools: body.tools || [],
     top_p: body.top_p || null,
     truncation: body.truncation || "disabled",
-    usage: responseUsageFromText(payload.message || "", result.text),
+    usage: responseUsageFromText("", result.text),
   });
 }
 
 async function openAIFileUpload(request, env) {
-  const body = await readJson(request);
-  const fileData = body.file || body;
-  const route = "/api/attachments/upload";
-  const result = await callUpstreamJson(request, env, route, fileData);
-  return jsonResponse(result);
+  return errorResponse(501, "unsupported_endpoint", "File upload is not supported by this Worker.");
 }
 
 async function handleAnthropic(request, env, path) {
@@ -253,8 +237,7 @@ async function handleAnthropic(request, env, path) {
       return anthropicMessages(request, env, body);
     }
     if (route === "/messages/count_tokens" && request.method === "POST") {
-      const body = await readJson(request);
-      return anthropicCountTokens(request, env, body);
+      return anthropicCountTokens(request, env);
     }
   }
 
@@ -264,15 +247,13 @@ async function handleAnthropic(request, env, path) {
 async function anthropicMessages(request, env, body) {
   const model = body.model || env.DEFAULT_MODEL || DEFAULT_CLAUDE_MODEL;
   const stream = body.stream !== false;
-  const route = "/api/chat";
-  const payload = buildAnthropicPayload(body);
 
   if (stream) {
-    const upstream = await callUpstreamStream(request, env, route, payload);
+    const upstream = await callUpstreamStream(request, env, "/v1/chat/completions", body);
     return sseResponse(streamAnthropic(upstream, { model }));
   }
 
-  const result = await collectUpstreamText(request, env, route, payload);
+  const result = await collectUpstreamText(request, env, "/v1/chat/completions", body);
   return jsonResponse({
     id: `msg_${randomId()}`,
     type: "message",
@@ -285,7 +266,7 @@ async function anthropicMessages(request, env, body) {
   });
 }
 
-async function anthropicCountTokens(request, env, body) {
+async function anthropicCountTokens(request, env) {
   return jsonResponse({ input_tokens: 0 });
 }
 
@@ -314,6 +295,8 @@ async function openAIModels(request, env) {
     object: "list",
   });
 }
+
+// ========== 辅助函数 ==========
 
 async function proxyUpstream(request, env, path) {
   const upstreamUrl = `${DEFAULT_UPSTREAM_BASE_URL}${path}`;
@@ -427,33 +410,6 @@ async function collectUpstreamText(request, env, route, body) {
   return { text, finishReason, outputTokens };
 }
 
-function buildUpstreamPayload(body, route) {
-  const payload = { ...body };
-
-  if (route === "/api/search") {
-    payload.web_search = true;
-    payload.query = body.messages?.[body.messages.length - 1]?.content || body.query || "";
-  } else if (route === "/api/merge") {
-    payload.merge = true;
-    payload.models = body.models || [DEFAULT_OPENAI_MODEL];
-  } else {
-    payload.message = body.messages?.[body.messages.length - 1]?.content || body.message || "";
-  }
-
-  return payload;
-}
-
-function buildAnthropicPayload(body) {
-  const messages = body.messages || [];
-  const lastMessage = messages[messages.length - 1] || {};
-
-  return {
-    message: lastMessage.content,
-    model: body.model || DEFAULT_CLAUDE_MODEL,
-    stream: body.stream,
-  };
-}
-
 function responsesToChatBody(body, model) {
   const messages = [];
 
@@ -471,12 +427,6 @@ function responsesToChatBody(body, model) {
   }
 
   return { model, messages, stream: body.stream };
-}
-
-function chooseUpstreamRoute(body) {
-  if (body.web_search_options || body.query) return "/api/search";
-  if (body.merge || (Array.isArray(body.models) && body.models.length > 1)) return "/api/merge";
-  return "/api/chat";
 }
 
 function streamOpenAIChat(upstream, config) {
@@ -641,6 +591,8 @@ function streamAnthropic(upstream, config) {
     },
   });
 }
+
+// ========== 工具函数 ==========
 
 function sseResponse(stream) {
   return new Response(stream, {
