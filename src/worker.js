@@ -18,13 +18,14 @@ export default {
     const url = new URL(request.url);
     const path = normalizePath(url.pathname);
 
+    // 公开端点无需认证
+    if (path === "/" || path === "/health") {
+      return jsonResponse(serviceInfo(request, env));
+    }
+
     try {
       const authError = validateWorkerApiKey(request, env);
       if (authError) return authError;
-
-      if (path === "/" || path === "/health") {
-        return jsonResponse(serviceInfo(request, env));
-      }
 
       if (path.startsWith("/api/")) {
         return proxyUpstream(request, env, path);
@@ -642,15 +643,22 @@ function sseResponse(stream) {
 }
 
 function jsonResponse(data, status = 200) {
-  return new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json", ...CORS_HEADERS } });
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+  });
 }
 
 function textResponse(text, contentType = "text/plain; charset=utf-8") {
-  return new Response(text, { headers: { "Content-Type": contentType, ...CORS_HEADERS } });
+  return new Response(text, {
+    headers: { "Content-Type": contentType, ...CORS_HEADERS },
+  });
 }
 
 function errorResponse(status, errorCode, errorMessage) {
-  return jsonResponse({ error: { message: errorMessage, type: errorCode, code: status } }, status);
+  return jsonResponse({
+    error: { message: errorMessage, type: errorCode, code: status },
+  }, status);
 }
 
 function normalizePath(path) {
@@ -667,6 +675,12 @@ function validateWorkerApiKey(request, env) {
   const workerApiKey = env.WORKER_API_KEY;
   if (!workerApiKey) return null;
 
+  const url = new URL(request.url);
+  const path = normalizePath(url.pathname);
+  const publicPaths = ["/", "/health"];
+  
+  if (publicPaths.includes(path)) return null;
+
   const authHeader = request.headers.get("authorization") || "";
   const token = authHeader.replace(/^Bearer\s+/i, "").trim();
 
@@ -677,7 +691,12 @@ function validateWorkerApiKey(request, env) {
 }
 
 function serviceInfo(request, env) {
-  return { ok: true, service: "agnes-ai-transfer-worker", upstream: DEFAULT_UPSTREAM_BASE_URL, timestamp: new Date().toISOString() };
+  return {
+    ok: true,
+    service: "agnes-ai-transfer-worker",
+    upstream: DEFAULT_UPSTREAM_BASE_URL,
+    timestamp: new Date().toISOString(),
+  };
 }
 
 function nowSeconds() { return Math.floor(Date.now() / 1000); }
